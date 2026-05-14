@@ -1,0 +1,272 @@
+// デュエルアリーナ Prismaスキーマ
+// 仕様書 §4 「データベーススキーマ」に対応
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===== ユーザー =====
+
+model User {
+  id                    String   @id @default(uuid())
+  discordId             String   @unique
+  username              String
+  avatarUrl             String
+  currentRating         Int      @default(1500)
+  highestRating         Int      @default(1500)
+  wins                  Int      @default(0)
+  losses                Int      @default(0)
+  draws                 Int      @default(0)
+  matchCount            Int      @default(0)
+  consecutiveTossCount  Int      @default(0)
+  averageStarRating     Float?
+  isBanned              Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  matchesAsPlayer1      Match[]            @relation("Player1")
+  matchesAsPlayer2      Match[]            @relation("Player2")
+  matchesWon            Match[]            @relation("Winner")
+  tossedMatches         Match[]            @relation("TossBy")
+  reports               MatchReport[]
+  ratingHistories       RatingHistory[]
+  queueEntry            QueueEntry?
+  recentOpponents       RecentOpponent[]   @relation("MainUser")
+  recentOpponentOf      RecentOpponent[]   @relation("Opponent")
+  raisedDisputes        Dispute[]          @relation("DisputeRaiser")
+  resolvedDisputes      Dispute[]          @relation("DisputeWinner")
+  reportsMade           Report[]           @relation("Reporter")
+  reportsReceived       Report[]           @relation("ReportTarget")
+  starRatingsGiven      StarRating[]       @relation("Rater")
+  starRatingsReceived   StarRating[]       @relation("Rated")
+  seasonTitles          SeasonTitle[]
+  bans                  Ban[]
+}
+
+// ===== 試合 =====
+
+enum MatchStatus {
+  PENDING_TOSS
+  IN_PROGRESS
+  WAITING_APPROVAL
+  DISPUTED
+  COMPLETED
+  CANCELLED
+  DRAW
+  INTERRUPTED
+}
+
+model Match {
+  id                       String      @id @default(uuid())
+  player1Id                String
+  player2Id                String
+  status                   MatchStatus @default(PENDING_TOSS)
+  winnerId                 String?
+  seasonId                 String?
+  discordVoiceChannelId    String?
+  tossById                 String?
+  player1Accepted          Boolean     @default(false)
+  player2Accepted          Boolean     @default(false)
+  acceptedAt               DateTime?
+  reportedAt               DateTime?
+  startedAt                DateTime    @default(now())
+  endedAt                  DateTime?
+  createdAt                DateTime    @default(now())
+
+  player1                  User              @relation("Player1", fields: [player1Id], references: [id])
+  player2                  User              @relation("Player2", fields: [player2Id], references: [id])
+  winner                   User?             @relation("Winner", fields: [winnerId], references: [id])
+  tossBy                   User?             @relation("TossBy", fields: [tossById], references: [id])
+  season                   Season?           @relation(fields: [seasonId], references: [id])
+  reports                  MatchReport[]
+  ratingHistories          RatingHistory[]
+  recentOpponentEntries    RecentOpponent[]
+  dispute                  Dispute?
+  reportsAgainstUsers      Report[]
+  starRatings              StarRating[]
+
+  @@index([player1Id])
+  @@index([player2Id])
+  @@index([status])
+}
+
+// ===== 勝敗報告 =====
+
+model MatchReport {
+  id                String   @id @default(uuid())
+  matchId           String
+  reporterId        String
+  reportedWinnerId  String
+  reportedAt        DateTime @default(now())
+
+  match    Match @relation(fields: [matchId], references: [id])
+  reporter User  @relation(fields: [reporterId], references: [id])
+
+  @@index([matchId])
+}
+
+// ===== レーティング履歴 =====
+
+enum RatingChangeReason {
+  MATCH
+  TOSS_RECEIVED
+  TOSS_PENALTY
+  SEASON_RESET
+  ADMIN_ADJUST
+}
+
+model RatingHistory {
+  id           String             @id @default(uuid())
+  userId       String
+  matchId      String?
+  ratingBefore Int
+  ratingAfter  Int
+  delta        Int
+  reason       RatingChangeReason
+  createdAt    DateTime           @default(now())
+
+  user  User   @relation(fields: [userId], references: [id])
+  match Match? @relation(fields: [matchId], references: [id])
+
+  @@index([userId])
+}
+
+// ===== マッチング待機列 =====
+
+model QueueEntry {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  ratingAtEntry Int
+  enteredAt     DateTime @default(now())
+  currentRange  Int      @default(100)
+  socketId      String
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// ===== 直近の対戦相手（連続マッチブロック用） =====
+
+model RecentOpponent {
+  id         String   @id @default(uuid())
+  userId     String
+  opponentId String
+  matchId    String
+  createdAt  DateTime @default(now())
+
+  user     User  @relation("MainUser", fields: [userId], references: [id])
+  opponent User  @relation("Opponent", fields: [opponentId], references: [id])
+  match    Match @relation(fields: [matchId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+// ===== 紛争 =====
+
+enum DisputeStatus {
+  OPEN
+  RESOLVED
+}
+
+model Dispute {
+  id                 String        @id @default(uuid())
+  matchId            String        @unique
+  raisedById         String
+  description        String
+  evidenceUrls       String[]
+  status             DisputeStatus @default(OPEN)
+  resolvedWinnerId   String?
+  resolvedByAdminId  String?
+  createdAt          DateTime      @default(now())
+  resolvedAt         DateTime?
+
+  match            Match @relation(fields: [matchId], references: [id])
+  raisedBy         User  @relation("DisputeRaiser", fields: [raisedById], references: [id])
+  resolvedWinner   User? @relation("DisputeWinner", fields: [resolvedWinnerId], references: [id])
+}
+
+// ===== 通報 =====
+
+enum ReportCategory {
+  CHEAT
+  HARASSMENT
+  NO_SHOW
+  OTHER
+}
+
+model Report {
+  id           String         @id @default(uuid())
+  matchId      String
+  reporterId   String
+  targetId     String
+  category     ReportCategory
+  description  String
+  evidenceUrls String[]
+  createdAt    DateTime       @default(now())
+
+  match    Match @relation(fields: [matchId], references: [id])
+  reporter User  @relation("Reporter", fields: [reporterId], references: [id])
+  target   User  @relation("ReportTarget", fields: [targetId], references: [id])
+
+  @@index([targetId])
+}
+
+// ===== 星評価 =====
+
+model StarRating {
+  id        String   @id @default(uuid())
+  matchId   String
+  raterId   String
+  ratedId   String
+  stars     Int
+  createdAt DateTime @default(now())
+
+  match Match @relation(fields: [matchId], references: [id])
+  rater User  @relation("Rater", fields: [raterId], references: [id])
+  rated User  @relation("Rated", fields: [ratedId], references: [id])
+
+  @@unique([matchId, raterId])
+  @@index([ratedId])
+}
+
+// ===== シーズン =====
+
+model Season {
+  id       String   @id @default(uuid())
+  name     String
+  startAt  DateTime
+  endAt    DateTime
+  isActive Boolean  @default(false)
+
+  matches Match[]
+  titles  SeasonTitle[]
+}
+
+model SeasonTitle {
+  id       String @id @default(uuid())
+  seasonId String
+  userId   String
+  rank     Int
+  title    String
+
+  season Season @relation(fields: [seasonId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+// ===== BAN =====
+
+model Ban {
+  id        String   @id @default(uuid())
+  userId    String
+  reason    String
+  bannedBy  String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
