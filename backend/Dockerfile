@@ -1,5 +1,6 @@
 FROM node:22-alpine AS base
 WORKDIR /app
+RUN apk add --no-cache openssl
 
 # ---- 依存関係インストール ----
 FROM base AS deps
