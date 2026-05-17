@@ -13,7 +13,7 @@ FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/prisma ./prisma
 COPY . .
-RUN npx tsc
+RUN npx tsc -p tsconfig.build.json
 
 # ---- 本番イメージ ----
 FROM base AS runner

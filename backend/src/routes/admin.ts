@@ -52,7 +52,7 @@ router.post('/users/:id/ban', async (req: AuthedRequest, res) => {
     return;
   }
   try {
-    const user = await banUser(prisma, req.params.id, reason, req.auth.discordId);
+    const user = await banUser(prisma, req.params.id as string, reason, req.auth.discordId);
     res.json({ user: toUserPublic(user), isBanned: user.isBanned });
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
@@ -129,7 +129,7 @@ router.post('/disputes/:id/resolve', async (req: AuthedRequest, res) => {
     return;
   }
   try {
-    const result = await resolveDispute(prisma, req.params.id, req.auth.discordId, resolution);
+    const result = await resolveDispute(prisma, req.params.id as string, req.auth.discordId, resolution);
     res.json({
       matchId: result.match.id,
       matchStatus: result.match.status,

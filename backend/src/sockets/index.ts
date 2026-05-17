@@ -24,14 +24,11 @@ function parseCookieHeader(header: string | undefined): Record<string, string> {
   return out;
 }
 
-declare module 'socket.io' {
-  interface Socket {
-    data: {
-      userId: string;
-      discordId: string;
-      isAdmin: boolean;
-    };
-  }
+// socket.data の型定義（socket.io v4 のジェネリクスに対応）
+export interface AppSocketData {
+  userId: string;
+  discordId: string;
+  isAdmin: boolean;
 }
 
 export function attachSocketServer(httpServer: HttpServer): Server {

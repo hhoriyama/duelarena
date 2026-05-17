@@ -18,7 +18,7 @@ router.get('/:id', requireAuth, async (req: AuthedRequest, res) => {
     return;
   }
   const match = await prisma.match.findUnique({
-    where: { id: req.params.id },
+    where: { id: req.params.id as string },
     include: {
       player1: true,
       player2: true,
@@ -130,7 +130,7 @@ router.post('/:id/star-rating', requireAuth, async (req: AuthedRequest, res) => 
     return;
   }
   try {
-    const result = await rateOpponent(prisma, req.params.id, req.auth.userId, stars);
+    const result = await rateOpponent(prisma, req.params.id as string, req.auth.userId, stars);
     res.json(result);
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
@@ -154,7 +154,7 @@ router.post('/:id/report-user', requireAuth, async (req: AuthedRequest, res) => 
   try {
     const result = await createReport(
       prisma,
-      req.params.id,
+      req.params.id as string,
       req.auth.userId,
       category as ReportCategory,
       description,
