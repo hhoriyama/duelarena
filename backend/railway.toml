@@ -6,5 +6,3 @@ dockerfilePath = "Dockerfile"
 startCommand = "npx prisma migrate deploy; node dist/index.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
-healthcheckPath = "/api/health"
-healthcheckTimeout = 30
