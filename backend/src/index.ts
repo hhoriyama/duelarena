@@ -4,6 +4,16 @@ import { env } from './config/env';
 import { attachSocketServer } from './sockets';
 import { initDiscordBot } from './discord/bot';
 
+// 未処理エラーを必ずログに残す
+process.on('uncaughtException', (err) => {
+  process.stderr.write(`[uncaughtException] ${err.stack ?? err.message}\n`);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  process.stderr.write(`[unhandledRejection] ${String(reason)}\n`);
+  process.exit(1);
+});
+
 async function main() {
   // サーバーを先に起動してヘルスチェックに応答できるようにする
   const app = createApp();
