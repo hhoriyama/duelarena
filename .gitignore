@@ -9,3 +9,6 @@ coverage/
 .vite/
 .cache/
 *.tsbuildinfo
+
+# 旧実装(v1: Discord OAuth + Socket.IO のWeb版)。Bot版へ移行済みのため追跡対象外。
+frontend/
