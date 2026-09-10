@@ -2,13 +2,15 @@
 
 Discord上でカードゲームの対戦相手を自動マッチングし、勝敗申告からEloレーティング・シーズン制までを一貫して管理するシステムです。
 
-対戦コミュニティの運営者が手作業で行っていた「対戦相手の組み合わせ」「戦績の集計」「順位表の更新」を自動化することを目的に開発しました。プレイヤーはDiscordのスラッシュコマンドだけで対戦を開始でき、Webサイトを開く必要はありません。
+対戦コミュニティの運営者が手作業で行っていた「対戦相手の組み合わせ」「戦績の集計」「順位表の更新」を自動化することを目的に開発しました。プレイヤーはDiscord上のボタン操作だけで対戦を開始でき、Webサイトを開く必要はありません。
+
+個人開発のプロジェクトです。Backend・Web・Discord Bot の3つを、設計から実装・デプロイまで一人で担当しています。
 
 ## システム構成
 
 ```mermaid
 flowchart LR
-    P[プレイヤー] -->|スラッシュコマンド| BOT[Discord Bot]
+    P[プレイヤー] -->|ボタン操作 / スラッシュコマンド| BOT[Discord Bot]
     BOT -->|REST /api/bot| BE[Backend]
     BE -.->|outbox をポーリング| BOT
     BOT -->|通知 / VC自動生成| DC[Discord]
@@ -22,7 +24,7 @@ flowchart LR
 |---|---|---|
 | Backend | マッチング・レーティング計算・戦績管理を行うAPIサーバー。Webも静的配信する | 本リポジトリ `backend/` |
 | Web | 順位表・対戦履歴・イベント戦の閲覧と、管理者向け画面 | 本リポジトリ `web/` |
-| Discord Bot | プレイヤーが実際に操作する入口。スラッシュコマンドの受付とVC自動生成 | [duelarena-bot](https://github.com/hhoriyama/duelarena-bot) |
+| Discord Bot | プレイヤーが実際に操作する入口。ボタンUIの提供と試合用チャンネルの自動生成 | [duelarena-bot](https://github.com/hhoriyama/duelarena-bot) |
 
 ## 技術スタック
 
