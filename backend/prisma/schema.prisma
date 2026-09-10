@@ -61,19 +61,30 @@ enum MatchStatus {
   INTERRUPTED
 }
 
+// 通常戦 / イベント戦（イベント戦はレート差無視でマッチし、レート・勝敗数は変動しない）
+enum MatchMode {
+  NORMAL
+  EVENT
+}
+
 model Match {
   id                       String      @id @default(uuid())
   player1Id                String
   player2Id                String
   status                   MatchStatus @default(PENDING_TOSS)
+  mode                     MatchMode   @default(NORMAL)
   winnerId                 String?
   seasonId                 String?
   discordVoiceChannelId    String?
+  discordTextChannelId     String?
   tossById                 String?
   player1Accepted          Boolean     @default(false)
   player2Accepted          Boolean     @default(false)
   acceptedAt               DateTime?
   reportedAt               DateTime?
+  // 残り時間リマインダーの送信済み記録（残り10分/5分）
+  reminder10SentAt         DateTime?
+  reminder5SentAt          DateTime?
   startedAt                DateTime    @default(now())
   endedAt                  DateTime?
   createdAt                DateTime    @default(now())
@@ -138,15 +149,56 @@ model RatingHistory {
 
 // ===== マッチング待機列 =====
 
+enum QueueSource {
+  WEB
+  DISCORD
+}
+
 model QueueEntry {
-  id            String   @id @default(uuid())
-  userId        String   @unique
+  id            String      @id @default(uuid())
+  userId        String      @unique
   ratingAtEntry Int
-  enteredAt     DateTime @default(now())
-  currentRange  Int      @default(100)
-  socketId      String
+  enteredAt     DateTime    @default(now())
+  currentRange  Int         @default(100)
+  // socketId は旧Web/Socket.IO用。Bot経由では未使用のため optional 化した。
+  socketId      String?
+  source        QueueSource @default(WEB)
+  mode          MatchMode   @default(NORMAL)
+  // 結果通知先のDiscordチャンネル等（source=DISCORD時に使用）
+  channelId     String?
 
   user User @relation(fields: [userId], references: [id])
+}
+
+// ===== アプリ全体の設定KV（イベント開催フラグ等） =====
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// ===== Bot配信の送信箱（ポーリング + outbox）DESIGN.md §5/§8 =====
+
+enum OutboxType {
+  MATCH_FOUND
+  MATCH_STARTED
+  REPORT_RECEIVED
+  RESULT_CONFIRMED
+  MATCH_CANCELLED
+  MATCH_REMINDER
+}
+
+model BotOutbox {
+  id          String     @id @default(uuid())
+  type        OutboxType
+  matchId     String?
+  payload     Json
+  delivered   Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  deliveredAt DateTime?
+
+  @@index([delivered, createdAt])
 }
 
 // ===== 直近の対戦相手（連続マッチブロック用） =====

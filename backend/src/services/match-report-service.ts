@@ -159,6 +159,9 @@ export async function rejectReport(
     if (match.status !== 'WAITING_APPROVAL') {
       throw new Error(`このステータスでは異議申し立てできません: ${match.status}`);
     }
+    if (rejecterId !== match.player1Id && rejecterId !== match.player2Id) {
+      throw new Error('参加者ではありません');
+    }
     const reports = await tx.matchReport.findMany({ where: { matchId } });
     if (reports.length === 0) throw new Error('まだ報告がありません');
     const myReport = reports.find((r) => r.reporterId === rejecterId);
@@ -205,7 +208,36 @@ export async function autoApprove(
 }
 
 /**
- * 40分タイムアウト：両者報告なし → 引き分け（レート変動なし）
+ * 40分タイムアウト：両者報告なし → 両者敗北（レート変動なし・敗北数のみ加算）
+ * イベント戦は成績を一切変えず、試合を打ち切るだけ。
+ */
+export async function markAsTimeoutLoss(
+  prisma: PrismaClient,
+  matchId: string,
+): Promise<Match> {
+  return prisma.$transaction(async (tx) => {
+    const match = await tx.match.findUnique({ where: { id: matchId } });
+    if (!match) throw new Error('Match not found');
+    if (match.status !== 'IN_PROGRESS') {
+      throw new Error(`Cannot mark as timeout in status ${match.status}`);
+    }
+
+    if (match.mode !== 'EVENT') {
+      await tx.user.updateMany({
+        where: { id: { in: [match.player1Id, match.player2Id] } },
+        data: { losses: { increment: 1 }, matchCount: { increment: 1 } },
+      });
+    }
+
+    return tx.match.update({
+      where: { id: matchId },
+      data: { status: 'INTERRUPTED', endedAt: new Date() },
+    });
+  });
+}
+
+/**
+ * （旧）40分タイムアウト：引き分け。現在は markAsTimeoutLoss を使用。
  */
 export async function markAsDraw(
   prisma: PrismaClient,
@@ -241,6 +273,18 @@ async function finalizeMatchTx(
 
   const winner = await tx.user.findUniqueOrThrow({ where: { id: winnerId } });
   const loser = await tx.user.findUniqueOrThrow({ where: { id: loserId } });
+
+  // イベント戦はレート・勝敗数を一切変動させず、試合結果だけを確定する
+  if (match.mode === 'EVENT') {
+    const updatedMatch = await tx.match.update({
+      where: { id: matchId },
+      data: { status: 'COMPLETED', winnerId: winner.id, endedAt: new Date() },
+    });
+    return {
+      match: updatedMatch,
+      result: { winner, loser, winnerDelta: 0, loserDelta: 0 },
+    };
+  }
 
   const change = calculateMatchRatingChange({
     winnerRating: winner.currentRating,
@@ -345,10 +389,11 @@ export async function tickMatchTimeouts(
     if (!m.acceptedAt) continue;
     if (now.getTime() - m.acceptedAt.getTime() > DRAW_TIMEOUT_MS) {
       try {
-        const updated = await markAsDraw(prisma, m.id);
+        // 時間切れは両者敗北として記録する
+        const updated = await markAsTimeoutLoss(prisma, m.id);
         drawn.push(updated);
       } catch (e) {
-        console.error('[tickMatchTimeouts] markAsDraw failed', m.id, e);
+        console.error('[tickMatchTimeouts] markAsTimeoutLoss failed', m.id, e);
       }
     }
   }

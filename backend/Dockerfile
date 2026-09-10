@@ -23,6 +23,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/prisma ./prisma
 COPY --from=builder /app/dist ./dist
 COPY package*.json ./
+COPY start.sh ./
+RUN chmod +x start.sh
 
 EXPOSE 3001
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+CMD ["/app/start.sh"]

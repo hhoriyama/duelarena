@@ -9,7 +9,6 @@
     "strict": true,
     "noImplicitAny": true,
     "outDir": "./dist",
-    "rootDir": "./src",
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
     "declaration": false,

@@ -224,6 +224,24 @@ export async function resolveDispute(
       const winner = await tx.user.findUniqueOrThrow({ where: { id: winnerId } });
       const loser = await tx.user.findUniqueOrThrow({ where: { id: loserId } });
 
+      // イベント戦の裁定はレート・勝敗数を動かさず結果のみ確定
+      if (match.mode === 'EVENT') {
+        updatedMatch = await tx.match.update({
+          where: { id: match.id },
+          data: { status: 'COMPLETED', winnerId, endedAt: new Date() },
+        });
+        const updatedDisputeEvent = await tx.dispute.update({
+          where: { id: disputeId },
+          data: {
+            status: 'RESOLVED',
+            resolvedWinnerId: winnerId,
+            resolvedByAdminId: adminDiscordId,
+            resolvedAt: new Date(),
+          },
+        });
+        return { match: updatedMatch, dispute: updatedDisputeEvent };
+      }
+
       const change = calculateMatchRatingChange({
         winnerRating: winner.currentRating,
         loserRating: loser.currentRating,

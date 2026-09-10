@@ -1,0 +1,87 @@
+:root {
+  --bg: #1e1f22;
+  --panel: #2b2d31;
+  --panel-2: #313338;
+  --text: #dbdee1;
+  --muted: #949ba4;
+  --accent: #5865f2;
+  --green: #57f287;
+  --red: #ed4245;
+  --border: #3f4147;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  line-height: 1.6;
+}
+
+.container { max-width: 860px; margin: 0 auto; padding: 16px; }
+
+/* ナビ */
+.nav {
+  display: flex; align-items: center; gap: 20px;
+  padding: 14px 20px; background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.nav .brand { font-weight: 700; font-size: 18px; color: #fff; }
+.nav a { color: var(--muted); text-decoration: none; font-size: 14px; }
+.nav a.active, .nav a:hover { color: #fff; }
+.nav .spacer { flex: 1; }
+
+/* テーブル */
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+tr:hover td { background: var(--panel-2); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.avatar { width: 28px; height: 28px; border-radius: 50%; vertical-align: middle; margin-right: 8px; background: var(--panel-2); }
+.rank-1 { color: #ffd700; font-weight: 700; }
+.rank-2 { color: #c0c0c0; font-weight: 700; }
+.rank-3 { color: #cd7f32; font-weight: 700; }
+
+/* カード・パネル */
+.card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 16px; margin-bottom: 12px;
+}
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+.stat .label { color: var(--muted); font-size: 12px; }
+.stat .value { font-size: 24px; font-weight: 700; }
+
+/* フォーム・ボタン */
+input[type='text'], input[type='password'], input[type='number'] {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 12px; font-size: 14px; width: 100%;
+}
+button {
+  background: var(--accent); color: #fff; border: none; border-radius: 6px;
+  padding: 8px 14px; font-size: 14px; cursor: pointer;
+}
+button:hover { filter: brightness(1.1); }
+button.secondary { background: var(--panel-2); border: 1px solid var(--border); }
+button.danger { background: var(--red); }
+button.success { background: #3d8a52; }
+button:disabled { opacity: 0.5; cursor: default; }
+
+.row { display: flex; gap: 8px; align-items: center; }
+.error { color: var(--red); font-size: 14px; }
+.muted { color: var(--muted); }
+.win { color: var(--green); font-weight: 600; }
+.lose { color: var(--muted); }
+.delta { font-variant-numeric: tabular-nums; }
+
+/* タブ */
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+.tabs button { background: transparent; color: var(--muted); border: 1px solid transparent; }
+.tabs button.active { background: var(--panel); color: #fff; border-color: var(--border); }
+
+h1 { font-size: 20px; margin: 20px 0 12px; }
+h2 { font-size: 16px; margin: 16px 0 8px; }

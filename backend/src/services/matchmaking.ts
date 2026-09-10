@@ -1,5 +1,6 @@
-import type { PrismaClient, Match, User } from '@prisma/client';
+import type { PrismaClient, Match, User, QueueSource, MatchMode } from '@prisma/client';
 import { Prisma } from '@prisma/client';
+import { env } from '../config/env';
 import {
   findMatch,
   findAllMatches,
@@ -15,6 +16,7 @@ export interface QueueState {
   enteredAt?: Date;
   currentRange?: number;
   ratingAtEntry?: number;
+  mode?: MatchMode;
 }
 
 export interface EnterResult {
@@ -35,29 +37,59 @@ export interface MatchedResult {
  *
  * @returns マッチ成立時は MatchedResult、待機開始時は EnterResult
  */
+export interface EnterQueueOptions {
+  source?: QueueSource;
+  channelId?: string;
+  /** NORMAL(既定) or EVENT。イベントはレート差無視・再マッチ制限なし・レート変動なし。 */
+  mode?: MatchMode;
+}
+
 export async function enterQueue(
   prisma: PrismaClient,
   userId: string,
-  socketId: string,
+  socketId?: string,
+  opts: EnterQueueOptions = {},
 ): Promise<EnterResult | MatchedResult> {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new Error('User not found');
   if (user.isBanned) throw new Error('User is banned');
 
-  // 進行中の試合があれば拒否
-  const activeMatch = await prisma.match.findFirst({
+  // 進行中の試合があれば拒否。
+  // ただし WAITING_APPROVAL は「既に報告済みの側」だけ次のマッチングに並べる
+  // （承認/異議をまだ選んでいない側はブロック）。
+  const activeMatches = await prisma.match.findMany({
     where: {
       OR: [{ player1Id: userId }, { player2Id: userId }],
       status: { in: ['PENDING_TOSS', 'IN_PROGRESS', 'WAITING_APPROVAL', 'DISPUTED'] },
     },
   });
-  if (activeMatch) {
-    throw new Error('進行中の試合があります');
+  for (const m of activeMatches) {
+    if (m.status === 'WAITING_APPROVAL') {
+      const myReport = await prisma.matchReport.findFirst({
+        where: { matchId: m.id, reporterId: userId },
+      });
+      if (!myReport) {
+        throw new Error(
+          '承認待ちの試合があります。先に「承認」または「異議あり」を選んでください',
+        );
+      }
+    } else {
+      throw new Error('進行中の試合があります');
+    }
   }
+
+  const mode: MatchMode = opts.mode ?? 'NORMAL';
 
   // 既にキュー内なら socketId を更新して既存状態を返す（idempotent）
   const existing = await prisma.queueEntry.findUnique({ where: { userId } });
   if (existing) {
+    if (existing.mode !== mode) {
+      throw new Error(
+        existing.mode === 'EVENT'
+          ? 'イベントマッチングで待機中です。先に「中断」してください'
+          : '通常マッチングで待機中です。先に「中断」してください',
+      );
+    }
     const updated = await prisma.queueEntry.update({
       where: { userId },
       data: { socketId },
@@ -74,14 +106,20 @@ export async function enterQueue(
     userId,
     rating: user.currentRating,
     enteredAt: now,
-    blockedOpponents: await getRecentOpponents(prisma, userId),
+    blockedOpponents: mode === 'EVENT' ? [] : await getRecentOpponents(prisma, userId),
     averageStarRating: user.averageStarRating,
   };
 
-  // 候補を取得
-  const candidates = await loadCandidates(prisma, userId);
+  // 候補を取得（同一モードのみ）
+  const candidates = await loadCandidates(prisma, userId, mode);
 
-  const opponent = findMatch(myInput, candidates, now);
+  // イベントはレート差無視のFIFO（最も長く待っている相手と組む）
+  const opponent =
+    mode === 'EVENT'
+      ? ([...candidates].sort(
+          (a, b) => a.enteredAt.getTime() - b.enteredAt.getTime(),
+        )[0] ?? null)
+      : findMatch(myInput, candidates, now);
 
   if (!opponent) {
     // 待機列へ。レースで既に作成されているケースはunique制約エラーをハンドル
@@ -91,6 +129,9 @@ export async function enterQueue(
           userId,
           ratingAtEntry: user.currentRating,
           socketId,
+          source: opts.source ?? 'WEB',
+          mode,
+          channelId: opts.channelId ?? null,
         },
       });
       return {
@@ -131,15 +172,19 @@ export async function enterQueue(
         player1Id: userId,
         player2Id: opponent.userId,
         status: 'PENDING_TOSS',
+        mode,
       },
     });
 
-    await tx.recentOpponent.createMany({
-      data: [
-        { userId, opponentId: opponent.userId, matchId: match.id },
-        { userId: opponent.userId, opponentId: userId, matchId: match.id },
-      ],
-    });
+    // イベント戦は再マッチ制限の対象にしない
+    if (mode === 'NORMAL') {
+      await tx.recentOpponent.createMany({
+        data: [
+          { userId, opponentId: opponent.userId, matchId: match.id },
+          { userId: opponent.userId, opponentId: userId, matchId: match.id },
+        ],
+      });
+    }
 
     return {
       matched: true,
@@ -172,6 +217,7 @@ export async function getQueueState(
     enteredAt: entry.enteredAt,
     ratingAtEntry: entry.ratingAtEntry,
     currentRange: computeRange(entry.enteredAt, now),
+    mode: entry.mode,
   };
 }
 
@@ -196,49 +242,80 @@ export async function tick(prisma: PrismaClient, now: Date = new Date()): Promis
 
   const remaining = all.filter((e) => !isExpired(e.enteredAt, now));
 
-  // 各エントリの blockedOpponents を取得
+  // 通常キュー: レート差ベースのマッチング
+  const normalEntries = remaining.filter((e) => e.mode === 'NORMAL');
   const candidates: (CandidateInput & { socketId: string })[] = await Promise.all(
-    remaining.map(async (e) => ({
+    normalEntries.map(async (e) => ({
       userId: e.userId,
       rating: e.user.currentRating,
       enteredAt: e.enteredAt,
       blockedOpponents: await getRecentOpponents(prisma, e.userId),
       averageStarRating: e.user.averageStarRating,
-      socketId: e.socketId,
+      socketId: e.socketId ?? '',
     })),
   );
 
   const { matched } = findAllMatches(candidates, now);
 
-  const matches: TickResult['matches'] = [];
-  for (const [a, b] of matched) {
-    const aFull = candidates.find((c) => c.userId === a.userId)!;
-    const bFull = candidates.find((c) => c.userId === b.userId)!;
+  // イベントキュー: レート差無視のFIFOペアリング
+  const eventEntries = [...remaining.filter((e) => e.mode === 'EVENT')].sort(
+    (a, b) => a.enteredAt.getTime() - b.enteredAt.getTime(),
+  );
 
+  interface PairPlan {
+    a: string;
+    b: string;
+    aSock: string;
+    bSock: string;
+    mode: MatchMode;
+  }
+  const pairs: PairPlan[] = matched.map(([a, b]) => ({
+    a: a.userId,
+    b: b.userId,
+    aSock: candidates.find((c) => c.userId === a.userId)?.socketId ?? '',
+    bSock: candidates.find((c) => c.userId === b.userId)?.socketId ?? '',
+    mode: 'NORMAL',
+  }));
+  for (let i = 0; i + 1 < eventEntries.length; i += 2) {
+    pairs.push({
+      a: eventEntries[i].userId,
+      b: eventEntries[i + 1].userId,
+      aSock: '',
+      bSock: '',
+      mode: 'EVENT',
+    });
+  }
+
+  const matches: TickResult['matches'] = [];
+  for (const pair of pairs) {
     const result = await prisma.$transaction(async (tx) => {
       // キューから両者を削除
       await tx.queueEntry.deleteMany({
-        where: { userId: { in: [a.userId, b.userId] } },
+        where: { userId: { in: [pair.a, pair.b] } },
       });
 
-      const userA = await tx.user.findUnique({ where: { id: a.userId } });
-      const userB = await tx.user.findUnique({ where: { id: b.userId } });
+      const userA = await tx.user.findUnique({ where: { id: pair.a } });
+      const userB = await tx.user.findUnique({ where: { id: pair.b } });
       if (!userA || !userB) throw new Error('User vanished during tick match');
 
       const match = await tx.match.create({
         data: {
-          player1Id: a.userId,
-          player2Id: b.userId,
+          player1Id: pair.a,
+          player2Id: pair.b,
           status: 'PENDING_TOSS',
+          mode: pair.mode,
         },
       });
 
-      await tx.recentOpponent.createMany({
-        data: [
-          { userId: a.userId, opponentId: b.userId, matchId: match.id },
-          { userId: b.userId, opponentId: a.userId, matchId: match.id },
-        ],
-      });
+      // イベント戦は再マッチ制限の対象にしない
+      if (pair.mode === 'NORMAL') {
+        await tx.recentOpponent.createMany({
+          data: [
+            { userId: pair.a, opponentId: pair.b, matchId: match.id },
+            { userId: pair.b, opponentId: pair.a, matchId: match.id },
+          ],
+        });
+      }
 
       return { match, userA, userB };
     });
@@ -247,8 +324,8 @@ export async function tick(prisma: PrismaClient, now: Date = new Date()): Promis
       match: result.match,
       player1: result.userA,
       player2: result.userB,
-      player1SocketId: aFull.socketId,
-      player2SocketId: bFull.socketId,
+      player1SocketId: pair.aSock,
+      player2SocketId: pair.bSock,
     });
   }
 
@@ -262,6 +339,8 @@ export async function tick(prisma: PrismaClient, now: Date = new Date()): Promis
  * ユーザーの直近対戦相手を取得（最大2件）
  */
 async function getRecentOpponents(prisma: PrismaClient, userId: string): Promise<string[]> {
+  // テスト用フラグ: 再マッチ制限を無効化（.env: DISABLE_REMATCH_BLOCK=true）
+  if (env.DISABLE_REMATCH_BLOCK) return [];
   const recents = await prisma.recentOpponent.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },
@@ -276,9 +355,10 @@ async function getRecentOpponents(prisma: PrismaClient, userId: string): Promise
 async function loadCandidates(
   prisma: PrismaClient,
   myUserId: string,
+  mode: MatchMode = 'NORMAL',
 ): Promise<CandidateInput[]> {
   const entries = await prisma.queueEntry.findMany({
-    where: { userId: { not: myUserId } },
+    where: { userId: { not: myUserId }, mode },
     include: { user: true },
   });
 
@@ -287,7 +367,7 @@ async function loadCandidates(
       userId: e.userId,
       rating: e.user.currentRating,
       enteredAt: e.enteredAt,
-      blockedOpponents: await getRecentOpponents(prisma, e.userId),
+      blockedOpponents: mode === 'EVENT' ? [] : await getRecentOpponents(prisma, e.userId),
       averageStarRating: e.user.averageStarRating,
     })),
   );

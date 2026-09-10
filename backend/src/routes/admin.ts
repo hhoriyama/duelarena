@@ -11,10 +11,53 @@ import {
   resolveDispute,
 } from '../services/admin-service';
 import { toUserPublic } from '../services/user-service';
+import { getEventSummary } from '../services/event-service';
 
 const router = Router();
 
 router.use(requireAuth, requireAdmin);
+
+/**
+ * GET /api/admin/event/draw?minWins=N — イベントの抽選
+ *
+ * - topWinners: 最多勝利者（同数勝利は全員）→ 確定プレゼント枠
+ * - candidates: 規定勝利数(minWins)以上のうち、最多勝利者を除いた人
+ * - picked: candidates からランダムで1名
+ *
+ * 押すたびに picked は引き直される（結果の確定は管理者の手動運用）。
+ */
+router.get('/event/draw', async (req, res) => {
+  const minWins = Math.max(1, Number(req.query.minWins ?? 3) || 3);
+  const summary = await getEventSummary(prisma);
+  const standings = summary.standings.filter((s) => s.wins > 0);
+
+  if (standings.length === 0) {
+    res.json({ minWins, maxWins: 0, topWinners: [], candidates: [], picked: null });
+    return;
+  }
+
+  const maxWins = standings[0].wins;
+  const topWinners = standings.filter((s) => s.wins === maxWins);
+  const topIds = new Set(topWinners.map((s) => s.discordId));
+  const candidates = standings.filter((s) => s.wins >= minWins && !topIds.has(s.discordId));
+  const picked =
+    candidates.length > 0
+      ? candidates[Math.floor(Math.random() * candidates.length)]
+      : null;
+
+  const pub = (s: { username: string; wins: number; losses: number }) => ({
+    username: s.username,
+    wins: s.wins,
+    losses: s.losses,
+  });
+  res.json({
+    minWins,
+    maxWins,
+    topWinners: topWinners.map(pub),
+    candidates: candidates.map(pub),
+    picked: picked ? pub(picked) : null,
+  });
+});
 
 /**
  * GET /api/admin/dashboard

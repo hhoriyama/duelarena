@@ -5,3 +5,7 @@ dist/
 *.log
 coverage/
 *.tsbuildinfo
+
+# 誤って生成されたテストのコンパイル成果物(ソースは.tsのみを正とする)
+tests/**/*.js
+tests/**/*.js.map
